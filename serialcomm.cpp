@@ -16,36 +16,35 @@
 
 /// actually registers a variable
 void SerialComm::_registerVar(void* ptr, uint8_t len){
-	this->_vars[_varsUsedCount].ptr = ptr;
+	(this->_vars[_varsUsedCount]).ptr = (uint8_t*)ptr;
 	this->_vars[_varsUsedCount].length = len;
 	this->_varsUsedCount ++;
 }
-
-SerialComm::SerialComm(Stream &serial, uint8_t varCount){
-	this->_serial = serial;
-	this->_serial->setTimeout(TIMEOUT_MSECS);
-	this->_varsCount = varCount;
-	this->_varsUsedCount = 0;
-	this->_vars = new VarStore[this->_varsCount];
+/// Constructor
+SerialComm::SerialComm(uint8_t varCount, uint8_t rxPin, uint8_t txPin, bool inverse_logic){
+	_serial = new SoftwareSerial(rxPin, txPin, inverse_logic);
+	_serial->setTimeout(TIMEOUT_MSECS);
+	_varsCount = varCount;
+	_varsUsedCount = 0;
+	_vars = new VarStore [_varsCount];
 }
 /// registers a variable
 /// 
 /// Returns: ID if successful, varCount if failed
-template <class T>
-unsigned char SerialComm::registerVar(T &var){
+uint8_t SerialComm::registerVar(void* var, uint8_t size){
 	if (this->_varsUsedCount == this->_varsCount)
 		return this->_varsCount;
 	uint8_t r = this->_varsUsedCount;
-	_registerVar(var, sizeof(T));
+	_registerVar(var, size);
 	return r;
 }
 /// establish connection
 void SerialComm::connect(){
 	// keep sending connection requests till it replies
 	do{
-		_serial.write(HS_RQ_CONNECT);
+		_serial->write(HS_RQ_CONNECT);
 		delay(TIMEOUT_MSECS);
-	}while (!_serial.available());
+	}while (!_serial->available());
 	// now wait for HS_RP_CONNECT before starting
 	uint8_t rcv;
 	bool cpConnectSent = false;
@@ -65,7 +64,7 @@ void SerialComm::send(uint8_t id){
 		_serial->write(RP_VAR);
 		_serial->write(id);
 		_serial->write(_vars[id].length);
-		_serial->write(_vars[id].ptr, _vars[id].length);
+		_serial->write((const uint8_t*)_vars[id].ptr, _vars[id].length);
 	}
 }
 /// sends all registered variables
@@ -74,7 +73,7 @@ void SerialComm::send(){
 		_serial->write(RP_VAR);
 		_serial->write(i);
 		_serial->write(_vars[i].length);
-		_serial->write(_vars[i].ptr, _vars[i].length);
+		_serial->write((const uint8_t*)_vars[i].ptr, _vars[i].length);
 	}
 }
 /// waits till timeout for commands, or new values, responds if necessary, & 

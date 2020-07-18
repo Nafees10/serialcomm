@@ -8,27 +8,27 @@
 #define serialcomm_h
 
 #include "Arduino.h"
+#include "SoftwareSerial.h"
 
-/// Manages sending and receiving of data over HardwareSerial or SoftwareSerial.
+/// Manages sending and receiving of data over SoftwareSerial.
 /// Can handle upto 241 variables. Do not register more than that
 class SerialComm{
 private:
 	struct VarStore{
-		void* ptr;
+		uint8_t* ptr;
 		uint8_t length;
 	};
-	Stream *_serial;
-	SerialComm::VarStore *_vars;
+	SoftwareSerial *_serial;
+	VarStore *_vars;
 	uint8_t _varsCount;
 	uint8_t _varsUsedCount;
 	void _registerVar(void* ptr, uint8_t len);
 public:
-	SerialComm(Stream &serial, uint8_t varCount);
+	SerialComm(uint8_t varCount, uint8_t rxPin, uint8_t txPin, bool inverse_logic=false);
 	/// registers a variable
 	/// 
 	/// Returns: ID if successful, varCount if failed
-	template <class T>
-	unsigned char registerVar(T &var);
+	uint8_t registerVar(void* var, uint8_t size);
 	/// establish connection
 	void connect();
 	/// Sends a single variable, using the variable ID
