@@ -140,6 +140,7 @@ public:
 				id = _serial->read();
 				while (_serial->available() == 0){}
 				length = _serial->read();
+				while (_serial->available() == 0){}
 				if (id >= VarCount || length != _vars[id].length){
 					// read Serial just to clear it, ignore the values
 					buffer = new uint8_t[length];
