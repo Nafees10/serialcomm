@@ -57,8 +57,8 @@ public:
 		if (this->_varsUsedCount >= VarCount)
 			return 255;
 		uint8_t r = this->_varsUsedCount;
-		_registerVar((uint8_t*)var, size);
 		_varsAutoSend[r] = autoSend;
+		_registerVar((uint8_t*)var, size);
 		return r;
 	}
 	/// waits for other device to respond.
@@ -70,6 +70,7 @@ public:
 		do{
 			_serial->write(HS_RQ_CONNECT);
 			while (_serial->available() == 0 && millis() - t < HS_RQ_DELAY){}
+			t = millis();
 		}while (_serial->available() == 0);
 		// now wait for HS_RP_CONNECT before starting
 		uint8_t rcv;
@@ -117,7 +118,8 @@ public:
 		unsigned long t = millis();
 		/// send the autoSend variables
 		for (uint8_t i = 0; i < VarCount; i ++){
-			this->send(i);
+			if (_varsAutoSend[i])
+				this->send(i);
 		}
 		/// wait for data to arrive on serial, with timeout
 		while (_serial->available() == 0){
