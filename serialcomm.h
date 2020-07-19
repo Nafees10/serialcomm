@@ -91,7 +91,7 @@ public:
 			_serial->write(RP_VAR);
 			_serial->write(id);
 			_serial->write(_vars[id].length);
-			_serial->write((const uint8_t*)_vars[id].ptr, _vars[id].length);
+			_serial->write(_vars[id].ptr, _vars[id].length);
 		}
 	}
 	/// sends all registered variables
@@ -140,7 +140,7 @@ public:
 				id = _serial->read();
 				while (_serial->available() == 0){}
 				length = _serial->read();
-				if (id >= VarCount || length > _vars[id].length){
+				if (id >= VarCount || length != _vars[id].length){
 					// read Serial just to clear it, ignore the values
 					buffer = new uint8_t[length];
 					_serial->readBytes(buffer, length);
