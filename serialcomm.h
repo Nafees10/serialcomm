@@ -114,7 +114,7 @@ public:
 	/// waits till timeout for commands, or new values, responds if necessary, & 
 	/// updates local values.
 	/// Set timeout to zero to wait indefinitely for update
-	void update(uint8_t timeout){
+	void update(uint8_t timeout = 0){
 		unsigned long t = millis();
 		/// send the autoSend variables
 		for (uint8_t i = 0; i < VarCount; i ++){
