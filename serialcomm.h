@@ -1,5 +1,5 @@
 /*
-  serialcomm.cpp - Arduino library for sending data over Serial.
+  serialcomm.h - Arduino library for sending data over Serial.
   Created by Nafees Hassan, July 2020.
   Released under MIT License, see LICENSE.md
 */
@@ -16,49 +16,60 @@
 #define RQ_VAR 0xF2
 #define RP_VAR 0xF3
 
-#define TIMEOUT_MSECS 1000
+#define HS_RQ_DELAY 1000
 
-/// Manages sending and receiving of data over SoftwareSerial.
-/// Can handle upto 241 variables. Do not register more than that
-template <class T>
+/// Manages sending and receiving of data over Serial.
+/// Can handle upto 128 variables, plus 112 strings
+template <class T, uint8_t VarCount>
 class SerialComm{
 	struct VarStore{
+		/// pointer to where the variable lives
 		uint8_t* ptr;
+		/// number of bytes in the variable.
 		uint8_t length;
 	};
 	T *_serial;
-	VarStore *_vars;
-	uint8_t _varsCount;
+	VarStore _vars[VarCount];
 	uint8_t _varsUsedCount;
-	void _registerVar(void* ptr, uint8_t len){
-		(_vars[_varsUsedCount]).ptr = (uint8_t*)ptr;
+	bool _varsAutoSend[VarCount];
+	void _registerVar(uint8_t* ptr, uint8_t len){
+		(_vars[_varsUsedCount]).ptr = ptr;
 		_vars[_varsUsedCount].length = len;
 		_varsUsedCount ++;
 	}
 public:
 	/// Constructor
-	SerialComm(T *sr, uint8_t varCount){
+	SerialComm(T *sr){
 		_serial = sr;
-		_varsCount = varCount;
 		_varsUsedCount = 0;
-		_vars = new VarStore [_varsCount];
+		for (uint8_t i = 0; i < VarCount; i ++)
+			_varsAutoSend[i] = false;
 	}
-	/// registers a variable
+	/// registers a variable. This works for:
+	/// 1. Regular varialbes (int, float, char ...)
+	/// 2. Static arrays
+	/// Do not use this with:
+	/// 1. strings (you can use a fixed-length array of char instead)
+	/// 2. Dynamic arrays (because pointers)
 	/// 
-	/// Returns: ID if successful, varCount if failed
-	uint8_t registerVar(void* var, uint8_t size){
-		if (this->_varsUsedCount == this->_varsCount)
-			return this->_varsCount;
+	/// Returns: ID if successful, 255 if failed
+	uint8_t registerVar(void* var, uint8_t size, bool autoSend = false){
+		if (this->_varsUsedCount >= VarCount)
+			return 255;
 		uint8_t r = this->_varsUsedCount;
-		_registerVar(var, size);
+		_registerVar((uint8_t*)var, size);
+		_varsAutoSend[r] = autoSend;
 		return r;
 	}
-	/// establish connection
-	void connect(){
+	/// waits for other device to respond.
+	/// Call this in setup() if you want to wait for both devices to be online,
+	/// or if you want them to sync up.
+	void awaitConnection(){
+		unsigned long t = millis();
 		// keep sending connection requests till it replies
 		do{
 			_serial->write(HS_RQ_CONNECT);
-			delay(TIMEOUT_MSECS);
+			while (_serial->available() == 0 && millis() - t < HS_RQ_DELAY){}
 		}while (_serial->available() == 0);
 		// now wait for HS_RP_CONNECT before starting
 		uint8_t rcv;
@@ -75,7 +86,7 @@ public:
 	}
 	/// Sends a single variable, using the variable ID
 	void send(uint8_t id){
-		if (id < _varsCount){
+		if (id < VarCount){
 			_serial->write(RP_VAR);
 			_serial->write(id);
 			_serial->write(_vars[id].length);
@@ -84,19 +95,33 @@ public:
 	}
 	/// sends all registered variables
 	void send(){
-		for (uint8_t i = 0; i < _varsCount; i ++){
+		for (uint8_t i = 0; i < VarCount; i ++){
 			_serial->write(RP_VAR);
 			_serial->write(i);
 			_serial->write(_vars[i].length);
 			_serial->write((const uint8_t*)_vars[i].ptr, _vars[i].length);
 		}
 	}
+	/// send request to send a variable (using variable ID)
+	/// call update() after this to receive the value
+	void request(uint8_t id){
+		if (id < VarCount){
+			_serial->write(RQ_VAR);
+			_serial->write(id);
+		}
+	}
 	/// waits till timeout for commands, or new values, responds if necessary, & 
-	/// updates local values
+	/// updates local values.
+	/// Set timeout to zero to wait indefinitely for update
 	void update(uint8_t timeout){
 		unsigned long t = millis();
+		/// send the autoSend variables
+		for (uint8_t i = 0; i < VarCount; i ++){
+			this->send(i);
+		}
+		/// wait for data to arrive on serial, with timeout
 		while (_serial->available() == 0){
-			if (millis() - t >= timeout)
+			if (timeout > 0 && millis() - t >= timeout)
 				break;
 		}
 		while (_serial->available()){
@@ -113,12 +138,19 @@ public:
 				id = _serial->read();
 				while (_serial->available() == 0){}
 				length = _serial->read();
-				buffer = new uint8_t[length];
-				_serial->readBytes(buffer, length);
+				if (id >= VarCount || length > _vars[id].length){
+					// read Serial just to clear it, ignore the values
+					buffer = new uint8_t[length];
+					_serial->readBytes(buffer, length);
+					delete[] buffer;
+				}else{
+					_serial->readBytes(_vars[id].ptr, length);
+				}
+				
 			}
 		}
 	}
-	/// use this instead of regular delay() when timeout is > 100msecs
+	/// prefer this instead of regular delay() when timeout is big enough for update()
 	void sleep(uint8_t timeout){
 		unsigned long t = millis();
 		update(timeout);
