@@ -1,14 +1,18 @@
 #include <Arduino.h>
 #include "serialcomm.h"
+#include "SoftwareSerial.h"
 
 #define LEDPIN 13
+#define RX 2
+#define TX 3
 
-SerialComm<HardwareSerial, 3> net(&Serial);
+SoftwareSerial swSerial(RX, TX);
+SerialComm<SoftwareSerial, 3> net(&swSerial);
 bool ledStatus;
 
 void setup() {
 	pinMode(LEDPIN, OUTPUT);
-	Serial.begin(9600);
+	swSerial.begin(9600);
 	net.registerVar(&ledStatus, sizeof(ledStatus));
 	net.awaitConnection(); // wait for other arduino to be on before going further
 }
