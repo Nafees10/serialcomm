@@ -10,17 +10,16 @@
 #include "Arduino.h"
 #include "SoftwareSerial.h"
 #include "HardwareSerial.h"
+#include "Stream.h"
 
-#define HS_RQ_CONNECT 0xF0
-#define HS_RP_CONNECT 0xF1
+#define HS_RQ_PING 0xF0
+#define HS_RP_PING 0xF1
 #define RQ_VAR 0xF2
 #define RP_VAR 0xF3
 
-#define HS_RQ_DELAY 1000
-
 /// Manages sending and receiving of data over Serial.
 /// Can handle upto 128 variables, plus 112 strings
-template <class T, uint8_t VarCount>
+template <uint8_t VarCount>
 class SerialComm{
 	struct VarStore{
 		/// pointer to where the variable lives
@@ -28,10 +27,11 @@ class SerialComm{
 		/// number of bytes in the variable.
 		uint8_t length;
 	};
-	T *_serial;
+	Stream *_serial;
 	VarStore _vars[VarCount];
 	uint8_t _varsUsedCount;
-	bool _varsAutoSend[VarCount];
+	unsigned long _maxLatency;
+	unsigned long _lastPing;
 	void _registerVar(uint8_t* ptr, uint8_t len){
 		(_vars[_varsUsedCount]).ptr = ptr;
 		_vars[_varsUsedCount].length = len;
@@ -39,11 +39,14 @@ class SerialComm{
 	}
 public:
 	/// Constructor
-	SerialComm(T *sr){
+	SerialComm(Stream *sr){
 		_serial = sr;
 		_varsUsedCount = 0;
-		for (uint8_t i = 0; i < VarCount; i ++)
-			_varsAutoSend[i] = false;
+		_maxLatency = 1000;
+	}
+	/// Sets maximum latency for ping timeouts. Default is 1000msecs
+	void setMaxLatency(unsigned long latency){
+		_maxLatency = latency;
 	}
 	/// registers a variable. This works for:
 	/// 1. Regular varialbes (int, float, char ...)
@@ -53,37 +56,37 @@ public:
 	/// 2. Dynamic arrays (because pointers)
 	/// 
 	/// Returns: ID if successful, 255 if failed
-	uint8_t registerVar(void* var, uint8_t size, bool autoSend = false){
+	uint8_t registerVar(void* var, uint8_t size){
 		if (this->_varsUsedCount >= VarCount)
 			return 255;
 		uint8_t r = this->_varsUsedCount;
-		_varsAutoSend[r] = autoSend;
 		_registerVar((uint8_t*)var, size);
 		return r;
 	}
-	/// waits for other device to respond.
-	/// Call this in setup() if you want to wait for both devices to be online,
-	/// or if you want them to sync up.
-	void awaitConnection(){
-		unsigned long t = millis();
-		// keep sending connection requests till it replies
-		do{
-			_serial->write(HS_RQ_CONNECT);
-			while (_serial->available() == 0 && millis() - t < HS_RQ_DELAY){}
-			t = millis();
-		}while (_serial->available() == 0);
-		// now wait for HS_RP_CONNECT before starting
-		uint8_t rcv;
-		bool cpConnectSent = false;
-		do{
+	/// Sends a ping, waits for reply. Use this to check if connected or not.
+	/// Returns: true if ping reply arrived, false if 
+	/// Writes latency (milliseconds) to `latency`
+	bool ping(unsigned long &latency){
+		// check if some data already received
+		if (_serial->available())
+			this->update(0);
+		_serial->write(HS_RQ_PING);
+		latency = millis();
+		while (millis() - latency < _maxLatency){
 			if (_serial->available()){
-				rcv = _serial->read();
-				if (rcv == HS_RQ_CONNECT && !cpConnectSent){
-					_serial->write(HS_RP_CONNECT);
-					cpConnectSent = true;
-				}
+				latency = millis() - latency;
+				if (_serial->read() == HS_RP_PING)
+					return true;
+				return false;
 			}
-		}while (rcv != HS_RP_CONNECT);
+		}
+		latency = millis() - latency;
+		return false;
+	}
+	/// Sends a ping. waits for reply. Returns true if reply arrived in time, false if not
+	bool ping(){
+		unsigned long latency;
+		return ping(latency);
 	}
 	/// Sends a single variable, using the variable ID
 	void send(uint8_t id){
@@ -103,24 +106,12 @@ public:
 			_serial->write((const uint8_t*)_vars[i].ptr, _vars[i].length);
 		}
 	}
-	/// send request to send a variable (using variable ID)
-	/// call update() after this to receive the value
-	void request(uint8_t id){
-		if (id < VarCount){
-			_serial->write(RQ_VAR);
-			_serial->write(id);
-		}
-	}
 	/// waits till timeout for commands, or new values, responds if necessary, & 
 	/// updates local values.
 	/// Set timeout to zero to wait indefinitely for update
+	/// Returns: true if some data was sent or received, false if nothing was done (might indicate a connection lost)
 	void update(uint8_t timeout = 0){
 		unsigned long t = millis();
-		/// send the autoSend variables
-		for (uint8_t i = 0; i < VarCount; i ++){
-			if (_varsAutoSend[i])
-				this->send(i);
-		}
 		/// wait for data to arrive on serial, with timeout
 		while (_serial->available() == 0){
 			if (timeout > 0 && millis() - t >= timeout)
@@ -129,7 +120,10 @@ public:
 		while (_serial->available()){
 			uint8_t command, id, length, *buffer;
 			command = _serial->read();
-			if (command == RQ_VAR){
+			if (command == HS_RQ_PING){
+				// send RP_PING back
+				_serial->write(HS_RP_PING);
+			}else if (command == RQ_VAR){
 				// read the id
 				while (_serial->available() == 0){}
 				id = _serial->read();
@@ -154,7 +148,7 @@ public:
 		}
 	}
 	/// prefer this instead of regular delay() when timeout is big enough for update()
-	void sleep(uint8_t timeout){
+	void sleep(unsigned long timeout){
 		unsigned long t = millis();
 		update(timeout);
 		if (millis() - t < timeout){
